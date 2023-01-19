@@ -1,0 +1,757 @@
+---
+title: OCVS
+description: Oracle Cloud Vmware Service cluster
+schemaVersion: 1.1.0
+version: "20221030"
+informationalText: Automated VMware cluster deployment
+
+source:
+  type: terraform
+  reference: N/A
+locale: "en"
+
+outputs:
+  bastion_login_command:
+    title: "SSH Into the Bastion Instance"
+    type: copyableString
+    visible: true
+  local_jumpbox_tunnel:
+    title: "Tunnel into the Windows Jumpbox"
+    type: copyableString
+    visible: true
+  vcenter_fqdn:
+    title: "vCenter url"
+    type: copyableString
+    visible: true
+  vcenter_username:
+    title: "vCenter username"
+    type: copyableString
+    visible: true
+  vcenter_initial_password:
+    title: "vCenter initial password"
+    type: copyableString
+    visible: true
+  FSS_Mount_Command:
+    title: "FSS Mount Command to VMware SDDC"
+    type: copyableString
+    visible: true
+
+variableGroups:
+  - title: "Infrastructure configuration"
+    variables:
+      - ${targetCompartment}
+      - ${ssh_key}
+      - ${use_custom_name}
+      - ${cluster_name}
+  - title: "General Network options"
+    variables:
+      - ${use_existing_vcn}
+      - ${vcn_compartment}
+      - ${vcn_id}
+      - ${public_subnet_id}
+      - ${private_subnet_id}
+      - ${vcn_subnet}
+      - ${public_subnet}
+      - ${private_subnet}
+      - ${nat_gateway}
+  - title: "Public Bastion Options"
+    variables:
+      - ${bastion_ad}
+      - ${bastion_shape}
+      - ${bastion_image}
+      - ${bastion_ocpus}
+      - ${bastion_custom_memory}
+      - ${bastion_memory}
+      - ${bastion_boot_volume_size}
+      - ${bastion_username}
+  - title: "Private Windows JumpHost Options"
+    variables:
+      - ${jumphost_ad}
+      - ${jumphost_shape}
+      - ${jumphost_image}
+      - ${jumphost_ocpus}
+      - ${jumphost_custom_memory}
+      - ${jumphost_memory}
+      - ${jumphost_boot_volume_size}
+      - ${jumphost_username}
+  - title: "SDDC Compute & Software Options"
+    variables:
+      - ${ad}
+      - ${esxi_host_shape}
+      - ${esxi_e4_host_ocpus}
+      - ${esxi_x7_host_ocpus}
+      - ${is_single_host_sddc}
+      - ${esxi_host_count}
+      - ${is_hcx_enabled}
+      - ${vmware_software_version}
+      - ${sddc_initial_sku}
+      - ${is_shielded_instance_enabled}
+  - title: "SDDC Networking Options"
+    variables:
+      - ${sddc_workload_cidr}
+      - ${is_default_provisioning_cidr_range}
+      - ${sddc_provisioning_cidr}
+      - ${vlan_nsx_edge_uplink1_cidr}
+      - ${vlan_nsx_edge_uplink2_cidr}
+      - ${vlan_nsx_edge_vtep_cidr}
+      - ${vlan_nsx_vtep_cidr}
+      - ${vlan_vmotion_cidr}
+      - ${vlan_vsan_cidr}
+      - ${vlan_vsphere_cidr}
+      - ${vlan_hcx_cidr}
+      - ${vlan_replication_cidr}
+      - ${vlan_provisioning_cidr}
+  - title: "Additional FSS (NFS) Datastore"
+    variables:
+      - ${create_fss}
+      - ${fss_compartment}
+      - ${fss_ad}
+      - ${fss_export_path}
+      - ${nfs_source_IP}
+  - title: "Hidden"
+    variables:
+      - ${region}
+      - ${tenancy_ocid}
+      - ${ssh_cidr}
+    visible: false
+
+
+variables:
+  targetCompartment:
+    title: "target compartment"
+    type: oci:identity:compartment:id
+    default: ${compartment_ocid}
+    required: true
+  ad:
+    type: oci:identity:availabilitydomain:name
+    visible: complexExpression
+    dependsOn:
+      compartmentId: ${targetCompartment}
+    required: true
+    description: "Availability Domain"
+    title: "Availability Domain"   
+  ssh_key:
+    type: oci:core:ssh:publickey
+    title: "Public SSH key"
+    description: "Public SSH key"
+    required: true
+  use_custom_name:
+    type: boolean
+    title: "use custom infrastructure name"
+    description: "Use custom name for the infrastructure (must be 10 characters or less with no special characters other than hyphen)."
+    default: false
+  cluster_name:
+    title: "Name of the cluster"
+    description: "Custom cluster name"
+    default: ""
+    type: string
+    visible:
+      and:
+        - ${use_custom_name}
+    required: true
+
+
+# Network Options
+  use_existing_vcn:
+    type: boolean
+    title: "Use Existing VCN"
+    description: "Use existing VCN or create new one"
+    default: false
+  vcn_compartment:
+    title: "VCN compartment"
+    type: oci:identity:compartment:id
+    visible: ${use_existing_vcn}
+    default: ${targetCompartment}
+    required: true
+  vcn_id:
+    type: oci:core:vcn:id
+    visible:
+      and:
+        - ${use_existing_vcn}
+    title: "Existing network"
+    default: ''
+    required: true
+    dependsOn:
+      compartmentId: ${vcn_compartment}
+  public_subnet_id:
+    type: oci:core:subnet:id
+    dependsOn:
+      compartmentId: ${vcn_compartment}
+      vcnId: ${vcn_id}
+      hidePublicSubnet: false
+    visible: ${use_existing_vcn}
+    required: true
+  private_subnet_id:
+    type: oci:core:subnet:id
+    dependsOn:
+      compartmentId: ${vcn_compartment}
+      vcnId: ${vcn_id}
+      hidePrivateSubnet: false
+    visible: ${use_existing_vcn}
+    required: true
+  nat_gateway:
+    type: oci:core:natgateway:id
+    dependsOn:
+      compartmentId: ${vcn_compartment}
+      vcnId: ${vcn_id}
+    visible: ${use_existing_vcn}
+    required: true
+  vcn_subnet:
+    type: string
+    title: "VCN IP range"
+    description: "VCN subnet"
+    default: "172.16.0.0/16"
+    required: true
+    visible:
+      not:
+        - ${use_existing_vcn}
+  public_subnet:
+    type: string
+    title: "Public subnet IP range where the bastion will reside"
+    default: "172.16.1.0/24"
+    description: "Must be within VCN cidr range"
+    required: true
+    visible:
+      not:
+        - ${use_existing_vcn}
+  private_subnet:
+    type: string
+    title: "Private subnet IP range where the jumphost to VMware will reside"
+    default: "172.16.2.0/24"
+    description: "Must be within VCN cidr range"
+    required: true
+    visible:
+      not:
+        - ${use_existing_vcn}
+  ssh_cidr:
+    type: string
+    title: "Initial CIDR range allowed to SSH"
+    default: "0.0.0.0/0"
+    description: "Allowed SSH network in CIDR notation"
+    required: true
+#   visible:
+#     not:
+#       - ${use_existing_vcn}
+
+
+# Public Linux Bastion Host Options
+  bastion_ad:
+    type: oci:identity:availabilitydomain:name
+    dependsOn:
+      compartmentId: ${targetCompartment}
+    visible: complexExpression
+    required: true
+    description: "Availability Domain for bastion host."
+    title: "Availability Domain"
+    default: ${ad}
+	
+  bastion_shape:
+    type: oci:core:instanceshape:name
+    dependsOn:
+      compartmentId: ${targetCompartment}
+    required: true
+    title: "Bastion Shape"
+    default: VM.Standard.E3.Flex
+	
+  bastion_image:
+    title: "Bastion Image ID"
+    description: "Image ID for the bastion host. Select Linux versions only."
+    type: oci:core:image:id
+    dependsOn:
+      compartmentId: ${targetCompartment}
+      operatingSystem: "Oracle Linux"
+    required: true
+
+  bastion_ocpus:
+    type: integer
+    title: "Bastion OCPU's"
+    description: Number of OCPU's for flex shape
+    minimum: 1
+    maximum: 64
+    default: 1
+    visible:
+      and: 
+        - or: 
+          - eq:
+            - ${bastion_shape}
+            - "VM.Standard.E3.Flex"
+          - eq: 
+            - ${bastion_shape}
+            - "VM.Standard.E4.Flex"
+          - eq:
+            - ${bastion_shape}
+            - "VM.Optimized3.Flex"
+          - eq: 
+            - ${bastion_shape}
+            - "VM.Standard.A1.Flex"
+          - eq:
+            - ${bastion_shape}
+            - "VM.Standard3.Flex"
+    required: true	
+	
+  bastion_custom_memory: 
+    title: Use custom memory size
+    type: boolean
+    default: false
+    visible:
+      and: 
+        - or: 
+          - eq:
+            - ${bastion_shape}
+            - "VM.Standard.E3.Flex"
+          - eq:
+            - ${bastion_shape}
+            - "VM.Optimized3.Flex"
+          - eq: 	
+            - ${bastion_shape}
+            - "VM.Standard.E4.Flex"
+          - eq: 
+            - ${bastion_shape}
+            - "VM.Standard.A1.Flex"
+          - eq:
+            - ${bastion_shape}
+            - "VM.Standard3.Flex"
+			
+  bastion_memory:
+    title: Memory in GBS
+    type: integer
+    description: Number of memory for flex shape. Minimum 1GB per core.
+    minimum: 1
+    maximum: 1024
+    default: 16
+    visible:
+      and: 
+        - and: 
+          - or: 
+            - eq:
+              - ${bastion_shape}
+              - "VM.Standard.E3.Flex"
+            - eq:
+              - ${bastion_shape}
+              - "VM.Optimized3.Flex"
+            - eq: 
+              - ${bastion_shape}
+              - "VM.Standard.E4.Flex"
+            - eq: 
+              - ${bastion_shape}
+              - "VM.Standard.A1.Flex"
+            - eq:
+              - ${bastion_shape}
+              - "VM.Standard3.Flex"
+        - and: 
+            - ${bastion_custom_memory}
+    required: true	
+	
+  bastion_boot_volume_size:
+    type: integer
+    required: true
+    minimum: 50
+    title: "Size of the boot volume in GB"
+    default: 50
+	
+  bastion_username: 
+    title: "Default username for jumphost" 
+    description: "Custom image ID for jumphost"
+    type: string
+    default: "opc"
+    required: true
+
+
+# Private Windows Jump Host Options
+  jumphost_ad:
+    type: oci:identity:availabilitydomain:name
+    dependsOn:
+      compartmentId: ${targetCompartment}
+    visible: complexExpression
+    required: true
+    description: "Availability Domain for jumphost"
+    title: "Availability Domain"
+    default: ${ad}
+	
+  jumphost_shape:
+    title: "Jumphost Shape"
+    type: oci:core:instanceshape:name
+    dependsOn:
+      compartmentId: ${targetCompartment}
+    required: true
+    default: VM.Standard.E3.Flex
+
+	
+  jumphost_image:
+    title: "Jumphost Image ID"
+    description: "Custom image ID for jump host."
+    type: oci:core:image:id
+    dependsOn:
+      compartmentId: ${targetCompartment}
+      operatingSystem: "Windows"
+    required: true
+
+  jumphost_ocpus:
+    type: integer
+    title: "Jumphost OCPU's"
+    description: Number of OCPU's for flex shape
+    minimum: 1
+    maximum: 64
+    default: 4
+    visible:
+      and: 
+        - or: 
+          - eq:
+            - ${jumphost_shape}
+            - "VM.Standard.E3.Flex"
+          - eq: 
+            - ${jumphost_shape}
+            - "VM.Standard.E4.Flex"
+          - eq:
+            - ${jumphost_shape}
+            - "VM.Optimized3.Flex"
+          - eq: 
+            - ${jumphost_shape}
+            - "VM.Standard.A1.Flex"
+          - eq:
+            - ${jumphost_shape}
+            - "VM.Standard3.Flex"
+    required: true	
+	
+  jumphost_custom_memory: 
+    title: Use custom memory size
+    type: boolean
+    default: false
+    visible:
+      and: 
+        - or: 
+          - eq:
+            - ${jumphost_shape}
+            - "VM.Standard.E3.Flex"
+          - eq:
+            - ${jumphost_shape}
+            - "VM.Optimized3.Flex"
+          - eq: 	
+            - ${jumphost_shape}
+            - "VM.Standard.E4.Flex"
+          - eq: 
+            - ${jumphost_shape}
+            - "VM.Standard.A1.Flex"
+          - eq:
+            - ${jumphost_shape}
+            - "VM.Standard3.Flex"
+            
+  jumphost_memory:
+    title: Memory in GBS
+    type: integer
+    description: Number of memory for flex shape. Minimum 1GB per core.
+    minimum: 1
+    maximum: 1024
+    default: 32
+    visible:
+      and: 
+        - and: 
+          - or: 
+            - eq:
+              - ${jumphost_shape}
+              - "VM.Standard.E3.Flex"
+            - eq:
+              - ${jumphost_shape}
+              - "VM.Optimized3.Flex"
+            - eq: 
+              - ${jumphost_shape}
+              - "VM.Standard.E4.Flex"
+            - eq: 
+              - ${jumphost_shape}
+              - "VM.Standard.A1.Flex"
+            - eq:
+              - ${jumphost_shape}
+              - "VM.Standard3.Flex"
+        - and: 
+            - ${jumphost_custom_memory}
+    required: true	
+	
+  jumphost_boot_volume_size:
+    type: integer
+    required: true
+    minimum: 50
+    title: "Size of the boot volume in GB"
+    default: 50
+	
+  jumphost_username: 
+    title: "Default username for jumphost" 
+    type: string
+    default: "opc"
+    required: true
+
+	
+# SDDC Options
+# Note - did not include capacity reservation capability
+  esxi_host_shape:
+    type: enum
+    enum:
+      - "BM.DenseIO2.52"
+      - "BM.DenseIO.E4.128"
+    default: "BM.DenseIO.E4.128"
+    title: "Shape of the ESXi Hosts"
+    description: "Shape of ESXi Hosts Used in the SDDC"
+    required: true
+    dependsOn:
+      compartmentId: ${targetCompartment}
+
+  esxi_e4_host_ocpus:
+    title: Cores
+    type: integer
+    description: Number of OCPU's for SDDC shape. Specify either 32, 64, or 128 for BM.DenseIO.E4.128.
+    minimum: 32
+    maximum: 128
+    default: 64
+    visible:
+      and: 
+        - or: 
+          - eq:
+            - ${esxi_host_shape}
+            - "BM.DenseIO.E4.128"
+    required: true
+
+  esxi_x7_host_ocpus:
+    title: Cores
+    type: integer
+    description: Number of OCPU's for SDDC shape. Specify 52 only for BM.DenseIO2.52.
+    minimum: 52
+    maximum: 52
+    default: 52
+    visible:
+      and: 
+        - or: 
+          - eq:
+            - ${esxi_host_shape}
+            - "BM.DenseIO2.52"
+    required: true
+
+  is_single_host_sddc:
+    type: boolean
+    title: "Use a single ESXi host on OCVS"
+    default: false
+    description: "When unchecked, single SDDC will be disabled" 
+
+  esxi_host_count:
+    required: true
+    type: integer
+    minimum: 3
+    maximum: 64
+    title: "Initial cluster size"
+    default: 3
+    description: "Number of Compute Instances (Permanent Cluster when autoscaling)"
+    visible:
+      not:
+        - ${is_single_host_sddc}
+
+  is_hcx_enabled:
+    type: boolean
+    title: "Enable HCX"
+    default: true
+    description: "Install the HCX plugin. Note that you cannot install this plugin after the SDDC is created." 
+
+  vmware_software_version:
+    type: enum
+    enum:
+      - "7.0 update 3"
+      - "6.7 update 3"
+      - "6.5 update 3"
+    default: "7.0 update 3"
+    title: "VMware Software Version"
+    description: "VMware software version installed on the esxi hosts."
+    required: true
+
+  sddc_initial_sku:
+    type: enum
+    enum:
+      - "HOUR"
+      - "MONTH"
+      - "ONE_YEAR"
+      - "THREE_YEARS"
+    default: "HOUR"
+    title: "Pricing Interval Commitment"
+    description: "Pricing commitment for the sku"
+    required: true
+
+  is_shielded_instance_enabled:
+    type: boolean
+    title: "Enable Shielded Instance"
+    default: false
+    description: "Enable TPM (Trust Platform Module) and use a secure boot image to boot up ESXi hosts"
+    visible: false
+
+
+
+# SDDC Network Options
+  sddc_workload_cidr:
+    type: string
+    title: "SDDC workload subnet CIDR range"
+    default: "192.168.0.0/16"
+    description: "Must not overlap with the VCN CIDR range"
+    required: true
+
+  is_default_provisioning_cidr_range:
+    type: boolean
+    title: "Use a default provisioning cidr range for the sddc."
+    default: true
+    description: "When checked the default is used. Uncheck to configure custom cidr range for the provisioning subnet and associated vlans." 
+
+  sddc_provisioning_cidr:
+    type: string
+    title: "SDDC provisioning subnet CIDR range"
+    default: "172.16.0.0/25"
+    description: "Must be within the VCN CIDR range."
+    required: true
+    visible:
+      not:
+        - ${is_default_provisioning_cidr_range}
+
+  vlan_nsx_edge_uplink1_cidr:
+    type: string
+    title: "VLAN NSX Edge Uplink 1 CIDR"
+    default: "172.16.3.0/25"
+    description: "Must be within VCN subnet and SDDC CIDR range"
+    required: true
+    visible:
+      not:
+        - ${is_default_provisioning_cidr_range}
+
+  vlan_nsx_edge_uplink2_cidr:
+    type: string
+    title: "VLAN NSX Edge Uplink 2 CIDR"
+    default: "172.16.4.0/25"
+    description: "Must be within VCN subnet and SDDC CIDR range"
+    required: true
+    visible:
+      not:
+        - ${is_default_provisioning_cidr_range}
+
+  vlan_nsx_edge_vtep_cidr:
+    type: string
+    title: "VLAN NSX Edge VTEP CIDR range"
+    default: "172.16.5.0/25"
+    description: "Must be within VCN subnet and SDDC CIDR range"
+    required: true 
+    visible:
+      not:
+        - ${is_default_provisioning_cidr_range}
+
+  vlan_nsx_vtep_cidr:
+    type: string
+    title: "VLAN NSX VTEP CIDR range"
+    default: "172.16.6.0/25"
+    description: "Must be within VCN subnet and SDDC CIDR range"
+    required: true
+    visible:
+      not:
+        - ${is_default_provisioning_cidr_range}
+
+  vlan_vmotion_cidr:
+    type: string
+    title: "VLAN vMotion CIDR range"
+    default: "172.16.7.0/25"
+    description: "Must be within VCN subnet and SDDC CIDR range"
+    required: true
+    visible:
+      not:
+        - ${is_default_provisioning_cidr_range}
+
+  vlan_vsan_cidr:
+    type: string
+    title: "VLAN vSAN CIDR range"
+    default: "172.16.8.0/25"
+    description: "Must be within VCN subnet and SDDC CIDR range"
+    required: true
+    visible:
+      not:
+        - ${is_default_provisioning_cidr_range}
+
+  vlan_vsphere_cidr:
+    type: string
+    title: "VLAN vSphere CIDR range"
+    default: "172.16.9.0/25"
+    description: "Must be within VCN subnet and SDDC CIDR range"
+    required: true
+    visible:
+      not:
+        - ${is_default_provisioning_cidr_range}
+
+  vlan_hcx_cidr:
+    type: string
+    title: "VLAN HCX CIDR range"
+    default: "172.16.10.0/25"
+    description: "Must be within VCN subnet and SDDC CIDR range"
+    required: true
+    visible:
+      not:
+        - ${is_default_provisioning_cidr_range}
+
+  vlan_replication_cidr:
+    type: string
+    title: "VLAN Replication CIDR range"
+    default: "172.16.11.0/25"
+    description: "Must be within VCN subnet and SDDC CIDR range"
+    required: true
+    visible:
+      not:
+        - ${is_default_provisioning_cidr_range}
+
+  vlan_provisioning_cidr:
+    type: string
+    title: "VLAN Provisioning CIDR range"
+    default: "172.16.12.0/25"
+    description: "Must be within VCN subnet and SDDC CIDR range"
+    required: true
+    visible:
+      not:
+        - ${is_default_provisioning_cidr_range}
+
+
+
+#Additional NFS Datastore using FSS
+  create_fss:
+    type: boolean
+    title: "Create FSS"
+    default: false
+    description: "Enables creation of an FSS file system for use as an additional NFS 3.0 datastore."
+    visible: true
+
+  fss_compartment:
+    title: "FSS compartment"
+    description: "Compartment to add the FSS Mount Target and File System"
+    type: oci:identity:compartment:id
+    default: ${targetCompartment}
+    required: true
+    visible: 
+      and:
+        - ${create_fss}
+
+  fss_ad:
+    type: oci:identity:availabilitydomain:name
+    dependsOn:
+      compartmentId: ${fss_compartment}
+    visible: 
+      and:
+        - ${create_fss}
+    default: ${ad}
+    description: "FSS Availability Domain"
+    title: "FSS Availability Domain"
+    required: true
+
+  fss_export_path:
+    title: "FSS export path"
+    description: "creates an FSS export to make the file system available through the mount target."
+    type: string
+    default: "/NFSdatastore"
+    required: true
+    visible: 
+      and:
+        - ${create_fss}
+
+  nfs_source_IP:
+    type: string
+    title: "NFS server IP"
+    default: "0.0.0.0"
+    required: true
+    description: "IP address of the NFS server"
+    visible: 
+      and:
+        - ${create_fss}
